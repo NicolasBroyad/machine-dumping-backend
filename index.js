@@ -28,12 +28,19 @@ app.use((req, res, next) => {
 // Registro de usuario
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, id_role } = req.body;
 
     // Validar campos requeridos
     if (!name || !email || !password) {
       return res.status(400).json({ 
         message: "Nombre, email y contraseña son requeridos" 
+      });
+    }
+
+    // Validar id_role (debe ser 1 o 2)
+    if (id_role && id_role !== 1 && id_role !== 2) {
+      return res.status(400).json({ 
+        message: "El rol debe ser 1 (Cliente) o 2 (Vendedor)" 
       });
     }
 
@@ -51,18 +58,19 @@ app.post("/api/auth/register", async (req, res) => {
     // Hashear la contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Crear usuario
+    // Crear usuario (id_role por defecto es 1 si no se proporciona)
     const usuario = await prisma.user.create({
       data: {
         username: name,
         email: email,
-        password: hashedPassword
+        password: hashedPassword,
+        id_role: id_role || 1 // Cliente por defecto
       }
     });
 
     // Generar token JWT
     const token = jwt.sign(
-      { userId: usuario.id_user, email: usuario.email },
+      { userId: usuario.id_user, email: usuario.email, role: usuario.id_role },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -73,7 +81,8 @@ app.post("/api/auth/register", async (req, res) => {
       usuario: {
         id: usuario.id_user,
         nombre: usuario.username,
-        email: usuario.email
+        email: usuario.email,
+        role: usuario.id_role
       }
     });
 
