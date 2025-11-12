@@ -1,9 +1,14 @@
 const express = require("express");
 const { PrismaClient } = require("@prisma/client");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = 3000;
+
+// Clave secreta para JWT (en producción, usar variable de entorno)
+const JWT_SECRET = "tu_clave_secreta_muy_segura_cambiala_en_produccion";
 
 app.use(express.json());
 
@@ -18,6 +23,176 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==================== RUTAS DE AUTENTICACIÓN ====================
+
+// Registro de usuario
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // Validar campos requeridos
+    if (!name || !email || !password) {
+      return res.status(400).json({ 
+        message: "Nombre, email y contraseña son requeridos" 
+      });
+    }
+
+    // Verificar si el usuario ya existe
+    const usuarioExistente = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (usuarioExistente) {
+      return res.status(400).json({ 
+        message: "El email ya está registrado" 
+      });
+    }
+
+    // Hashear la contraseña
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Crear usuario
+    const usuario = await prisma.user.create({
+      data: {
+        username: name,
+        email: email,
+        password: hashedPassword
+      }
+    });
+
+    // Generar token JWT
+    const token = jwt.sign(
+      { userId: usuario.id_user, email: usuario.email },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.status(201).json({
+      message: "Usuario registrado exitosamente",
+      token,
+      usuario: {
+        id: usuario.id_user,
+        nombre: usuario.username,
+        email: usuario.email
+      }
+    });
+
+  } catch (error) {
+    console.error("Error en registro:", error);
+    res.status(500).json({ 
+      message: "Error al registrar usuario",
+      error: error.message 
+    });
+  }
+});
+
+// Login de usuario
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validar campos requeridos
+    if (!email || !password) {
+      return res.status(400).json({ 
+        message: "Email y contraseña son requeridos" 
+      });
+    }
+
+    // Buscar usuario por email
+    const usuario = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (!usuario) {
+      return res.status(401).json({ 
+        message: "Credenciales incorrectas" 
+      });
+    }
+
+    // Verificar contraseña
+    const passwordValida = await bcrypt.compare(password, usuario.password);
+
+    if (!passwordValida) {
+      return res.status(401).json({ 
+        message: "Credenciales incorrectas" 
+      });
+    }
+
+    // Generar token JWT
+    const token = jwt.sign(
+      { userId: usuario.id_user, email: usuario.email },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      message: "Login exitoso",
+      token,
+      usuario: {
+        id: usuario.id_user,
+        nombre: usuario.username,
+        email: usuario.email
+      }
+    });
+
+  } catch (error) {
+    console.error("Error en login:", error);
+    res.status(500).json({ 
+      message: "Error al iniciar sesión",
+      error: error.message 
+    });
+  }
+});
+
+// Middleware para verificar token JWT
+const verificarToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    return res.status(401).json({ message: "Token no proporcionado" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.userId;
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: "Token inválido o expirado" });
+  }
+};
+
+// Ruta protegida - Obtener perfil del usuario
+app.get("/api/auth/perfil", verificarToken, async (req, res) => {
+  try {
+    const usuario = await prisma.user.findUnique({
+      where: { id_user: req.userId },
+      select: {
+        id_user: true,
+        username: true,
+        email: true
+      }
+    });
+
+    if (!usuario) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    res.json({
+      id: usuario.id_user,
+      nombre: usuario.username,
+      email: usuario.email
+    });
+
+  } catch (error) {
+    console.error("Error al obtener perfil:", error);
+    res.status(500).json({ 
+      message: "Error al obtener perfil",
+      error: error.message 
+    });
+  }
+});
+
+// ==================== RUTAS ORIGINALES ====================
 
 
 // Registrar usuario 
