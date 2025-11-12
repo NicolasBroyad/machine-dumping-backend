@@ -38,7 +38,12 @@ npm run seed
 
 # Iniciar el servidor
 npm start
+
+
+#Crear en la carpeta machine-dumping-backend un archivo .env con el siguiente contenido:
+DATABASE_URL="file:./prisma/dev.db"
 ```
+
 
  El backend estará corriendo en **http://localhost:3000**
 
