@@ -14,7 +14,9 @@ model Usuario {
   id        Int        @id @default(autoincrement())
   nombre    String
   email     String     @unique
+  contrasenia  String
   escaneos  Escaneo[]
+  foto      String
 }
 
 model Producto {
