@@ -18,24 +18,29 @@ app.use((req, res, next) => {
   next();
 });
 
-// Crear usuario
-app.post("/usuarios", async (req, res) => {
-  const usuario = await prisma.usuario.create({
-    data: { nombre: req.body.nombre, email: req.body.email },
+
+
+// Registrar usuario 
+app.post("/register", async (req, res) => {
+  const user = await prisma.user.create({
+    data: { username: req.body.username, 
+            email: req.body.email, 
+            password: req.body.password, 
+            profile_picture: req.body.profile_picture },
   });
-  res.json(usuario);
+  res.json(user);
 });
 
 // Crear producto
 app.post("/productos", async (req, res) => {
-  const producto = await prisma.producto.create({
+  const product = await prisma.product.create({
     data: {
-      codigoBarra: req.body.codigoBarra,
-      nombre: req.body.nombre,
-      precio: req.body.precio,
+      Barcode: req.body.Barcode,
+      product_name: req.body.product_name,
+      price: req.body.price,
     },
   });
-  res.json(producto);
+  res.json(product);
 });
 
 // Registrar escaneo
