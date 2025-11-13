@@ -12,48 +12,35 @@ datasource db {
 
 
 model User {
-  id_user         Int        @id @default(autoincrement())
-  id_enviroment   Int?
-  username        String
-  email           String     @unique
-  password        String
-  points          Int        @default(0)
-  enviroment      Environment? @relation(fields: [id_enviroment], references: [id_environment])
-  records         Record[]
+  id        Int      @id @default(autoincrement())
+  username  String
+  email     String   @unique
+  password  String
+  rolId     Int
+
+  rol       Rol      @relation(fields: [rolId], references: [id])
+  client    Client?
+  company   Company?
 }
 
-model Company{
-  id_company       Int        @id @default(autoincrement())
-  username         String
-  email            String     @unique
-  password         String
-  enviroment       Environment?
+model Rol {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique
+
+  users User[]
 }
 
-model Environment{
-  id_environment   Int        @id @default(autoincrement())
-  id_company       Int        @unique
-  enviroment_name  String
-  users            User[]
-  products         Product[]
-  company          Company   @relation(fields: [id_company], references: [id_company])
+model Client {
+  id        Int  @id @default(autoincrement())
+  userId    Int  @unique
+  points    Int  @default(0)
+
+  user      User @relation(fields: [userId], references: [id])
 }
 
-model Product{
-  id_product      Int        @id @default(autoincrement())
-  id_environment  Int
-  product_name    String
-  barcode         String     @unique
-  price           Int
-  records         Record[]
-  environment     Environment @relation(fields: [id_environment], references: [id_environment])
-}
+model Company {
+  id        Int  @id @default(autoincrement())
+  userId    Int  @unique
 
-model Record{
-  id_record       Int        @id @default(autoincrement())
-  id_user         Int
-  id_product      Int
-  created_at      DateTime   @default(now())
-  user            User       @relation(fields: [id_user], references: [id_user])
-  product         Product    @relation(fields: [id_product], references: [id_product])
+  user      User @relation(fields: [userId], references: [id])
 }

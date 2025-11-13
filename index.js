@@ -58,19 +58,42 @@ app.post("/api/auth/register", async (req, res) => {
     // Hashear la contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Crear usuario (id_role por defecto es 1 si no se proporciona)
+    // Crear usuario con rol (id_role por defecto es 1 si no se proporciona)
+    const rolId = id_role || 1; // Cliente por defecto
     const usuario = await prisma.user.create({
       data: {
         username: name,
         email: email,
         password: hashedPassword,
-        id_role: id_role || 1 // Cliente por defecto
+        rolId: rolId
+      },
+      include: {
+        rol: true
       }
     });
 
+    // Si es cliente (rol 1), crear registro en tabla Client
+    if (rolId === 1) {
+      await prisma.client.create({
+        data: {
+          userId: usuario.id,
+          points: 0
+        }
+      });
+    }
+
+    // Si es vendedor (rol 2), crear registro en tabla Company
+    if (rolId === 2) {
+      await prisma.company.create({
+        data: {
+          userId: usuario.id
+        }
+      });
+    }
+
     // Generar token JWT
     const token = jwt.sign(
-      { userId: usuario.id_user, email: usuario.email, role: usuario.id_role },
+      { userId: usuario.id, email: usuario.email, role: usuario.rolId },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -79,10 +102,11 @@ app.post("/api/auth/register", async (req, res) => {
       message: "Usuario registrado exitosamente",
       token,
       usuario: {
-        id: usuario.id_user,
+        id: usuario.id,
         nombre: usuario.username,
         email: usuario.email,
-        role: usuario.id_role
+        role: usuario.rolId,
+        rolNombre: usuario.rol.name
       }
     });
 
@@ -109,7 +133,10 @@ app.post("/api/auth/login", async (req, res) => {
 
     // Buscar usuario por email
     const usuario = await prisma.user.findUnique({
-      where: { email }
+      where: { email },
+      include: {
+        rol: true
+      }
     });
 
     if (!usuario) {
@@ -129,7 +156,7 @@ app.post("/api/auth/login", async (req, res) => {
 
     // Generar token JWT
     const token = jwt.sign(
-      { userId: usuario.id_user, email: usuario.email },
+      { userId: usuario.id, email: usuario.email, role: usuario.rolId },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -138,9 +165,11 @@ app.post("/api/auth/login", async (req, res) => {
       message: "Login exitoso",
       token,
       usuario: {
-        id: usuario.id_user,
+        id: usuario.id,
         nombre: usuario.username,
-        email: usuario.email
+        email: usuario.email,
+        role: usuario.rolId,
+        rolNombre: usuario.rol.name
       }
     });
 
@@ -174,11 +203,20 @@ const verificarToken = (req, res, next) => {
 app.get("/api/auth/perfil", verificarToken, async (req, res) => {
   try {
     const usuario = await prisma.user.findUnique({
-      where: { id_user: req.userId },
+      where: { id: req.userId },
+      include: {
+        rol: true
+      },
       select: {
-        id_user: true,
+        id: true,
         username: true,
-        email: true
+        email: true,
+        rolId: true,
+        rol: {
+          select: {
+            name: true
+          }
+        }
       }
     });
 
@@ -187,9 +225,11 @@ app.get("/api/auth/perfil", verificarToken, async (req, res) => {
     }
 
     res.json({
-      id: usuario.id_user,
+      id: usuario.id,
       nombre: usuario.username,
-      email: usuario.email
+      email: usuario.email,
+      role: usuario.rolId,
+      rolNombre: usuario.rol.name
     });
 
   } catch (error) {
