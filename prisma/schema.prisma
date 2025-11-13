@@ -13,20 +13,40 @@ datasource db {
 
 model User {
   id_user         Int        @id @default(autoincrement())
-  id_role         Int        @default(1)
+  id_enviroment   Int?
   username        String
   email           String     @unique
   password        String
-  puntaje         Int        @default(0)
+  points          Int        @default(0)
+  enviroment      Environment? @relation(fields: [id_enviroment], references: [id_environment])
   records         Record[]
+}
+
+model Company{
+  id_company       Int        @id @default(autoincrement())
+  username         String
+  email            String     @unique
+  password         String
+  enviroment       Environment?
+}
+
+model Environment{
+  id_environment   Int        @id @default(autoincrement())
+  id_company       Int        @unique
+  enviroment_name  String
+  users            User[]
+  products         Product[]
+  company          Company   @relation(fields: [id_company], references: [id_company])
 }
 
 model Product{
   id_product      Int        @id @default(autoincrement())
+  id_environment  Int
   product_name    String
   barcode         String     @unique
   price           Int
   records         Record[]
+  environment     Environment @relation(fields: [id_environment], references: [id_environment])
 }
 
 model Record{
