@@ -30,71 +30,68 @@ app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, email, password, id_role } = req.body;
 
+    // Validar campos requeridos
     if (!name || !email || !password) {
-      return res.status(400).json({ message: "Nombre, email y contraseña son requeridos" });
+      return res.status(400).json({ 
+        message: "Nombre, email y contraseña son requeridos" 
+      });
     }
 
+    // Validar id_role (debe ser 1 o 2)
     if (id_role && id_role !== 1 && id_role !== 2) {
-      return res.status(400).json({ message: "El rol debe ser 1 (Cliente) o 2 (Vendedor)" });
+      return res.status(400).json({ 
+        message: "El rol debe ser 1 (Cliente) o 2 (Vendedor)" 
+      });
     }
 
-    // Verificar email en ambas tablas
-    const [usuarioExistente, empresaExistente] = await Promise.all([
-      prisma.user.findUnique({ where: { email } }),
-      prisma.company.findUnique({ where: { email } }),
-    ]);
-    if (usuarioExistente || empresaExistente) {
-      return res.status(400).json({ message: "El email ya está registrado" });
+    // Verificar si el usuario ya existe
+    const usuarioExistente = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (usuarioExistente) {
+      return res.status(400).json({ 
+        message: "El email ya está registrado" 
+      });
     }
 
+    // Hashear la contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Si id_role === 2 => crear company; si es 1 o no viene => crear user
-    if (id_role === 2) {
-      const vendedor = await prisma.company.create({
-        data: {
-          username: name, // el modelo Company tiene campo username
-          email,
-          password: hashedPassword,
-        },
-      });
+    // Crear usuario (id_role por defecto es 1 si no se proporciona)
+    const usuario = await prisma.user.create({
+      data: {
+        username: name,
+        email: email,
+        password: hashedPassword,
+        id_role: id_role || 1 // Cliente por defecto
+      }
+    });
 
-      const token = jwt.sign(
-        { id: vendedor.id_company, email: vendedor.email, role: "company" },
-        JWT_SECRET,
-        { expiresIn: "7d" }
-      );
+    // Generar token JWT
+    const token = jwt.sign(
+      { userId: usuario.id_user, email: usuario.email, role: usuario.id_role },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-      return res.status(201).json({
-        message: "Vendedor registrado exitosamente",
-        token,
-        usuario: { id: vendedor.id_company, nombre: vendedor.username, email: vendedor.email, role: "company" },
-      });
-    } else {
-      const usuario = await prisma.user.create({
-        data: {
-          username: name,
-          email,
-          password: hashedPassword,
-        },
-      });
-
-      const token = jwt.sign(
-        { id: usuario.id_user, email: usuario.email, role: "user" },
-        JWT_SECRET,
-        { expiresIn: "7d" }
-      );
-
-      return res.status(201).json({
-        message: "Usuario registrado exitosamente",
-        token,
-        usuario: { id: usuario.id_user, nombre: usuario.username, email: usuario.email, role: "user" },
-      });
-    }
+    res.status(201).json({
+      message: "Usuario registrado exitosamente",
+      token,
+      usuario: {
+        id: usuario.id_user,
+        nombre: usuario.username,
+        email: usuario.email,
+        role: usuario.id_role
+      }
+    });
 
   } catch (error) {
     console.error("Error en registro:", error);
-    res.status(500).json({ message: "Error al registrar usuario", error: error.message });
+    res.status(500).json({ 
+      message: "Error al registrar usuario",
+      error: error.message 
+    });
   }
 });
 
