@@ -91,6 +91,9 @@ app.post("/api/auth/register", async (req, res) => {
       });
     }
 
+    // Determinar tipo según rol
+    const tipo = rolId === 2 ? 'compania' : 'cliente';
+
     // Generar token JWT
     const token = jwt.sign(
       { userId: usuario.id, email: usuario.email, role: usuario.rolId },
@@ -106,7 +109,8 @@ app.post("/api/auth/register", async (req, res) => {
         nombre: usuario.username,
         email: usuario.email,
         role: usuario.rolId,
-        rolNombre: usuario.rol.name
+        rolNombre: usuario.rol.name,
+        tipo: tipo
       }
     });
 
@@ -135,7 +139,9 @@ app.post("/api/auth/login", async (req, res) => {
     const usuario = await prisma.user.findUnique({
       where: { email },
       include: {
-        rol: true
+        rol: true,
+        client: true,
+        company: true
       }
     });
 
@@ -154,6 +160,12 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
+    // Determinar tipo según relaciones
+    let tipo = 'cliente';
+    if (usuario.company) {
+      tipo = 'compania';
+    }
+
     // Generar token JWT
     const token = jwt.sign(
       { userId: usuario.id, email: usuario.email, role: usuario.rolId },
@@ -169,7 +181,8 @@ app.post("/api/auth/login", async (req, res) => {
         nombre: usuario.username,
         email: usuario.email,
         role: usuario.rolId,
-        rolNombre: usuario.rol.name
+        rolNombre: usuario.rol.name,
+        tipo: tipo
       }
     });
 
@@ -205,18 +218,9 @@ app.get("/api/auth/perfil", verificarToken, async (req, res) => {
     const usuario = await prisma.user.findUnique({
       where: { id: req.userId },
       include: {
-        rol: true
-      },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        rolId: true,
-        rol: {
-          select: {
-            name: true
-          }
-        }
+        rol: true,
+        client: true,
+        company: true
       }
     });
 
@@ -224,12 +228,22 @@ app.get("/api/auth/perfil", verificarToken, async (req, res) => {
       return res.status(404).json({ message: "Usuario no encontrado" });
     }
 
+    // Determinar tipo según relaciones
+    let tipo = 'cliente';
+    if (usuario.company) {
+      tipo = 'compania';
+    }
+
     res.json({
       id: usuario.id,
       nombre: usuario.username,
       email: usuario.email,
       role: usuario.rolId,
-      rolNombre: usuario.rol.name
+      rolNombre: usuario.rol.name,
+      tipo: tipo,
+      // Info adicional según tipo
+      ...(usuario.client && { puntos: usuario.client.points }),
+      ...(usuario.company && { esCompania: true })
     });
 
   } catch (error) {
