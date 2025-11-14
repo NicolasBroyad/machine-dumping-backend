@@ -10,7 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
   id        Int      @id @default(autoincrement())
   username  String
@@ -39,8 +38,28 @@ model Client {
 }
 
 model Company {
-  id        Int  @id @default(autoincrement())
-  userId    Int  @unique
+  id            Int           @id @default(autoincrement())
+  userId        Int           @unique
 
-  user      User @relation(fields: [userId], references: [id])
+  user          User          @relation(fields: [userId], references: [id])
+  environments  Environment[]
+}
+
+model Environment {
+  id        Int       @id @default(autoincrement())
+  name      String
+  companyId Int
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  products  Product[]
+}
+
+model Product {
+  id            Int        @id @default(autoincrement())
+  name          String
+  price         Float
+  barcode       String     @unique
+  environmentId Int
+
+  environment   Environment @relation(fields: [environmentId], references: [id])
 }

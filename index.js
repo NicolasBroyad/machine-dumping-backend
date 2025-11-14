@@ -241,6 +241,134 @@ app.get("/api/auth/perfil", verificarToken, async (req, res) => {
   }
 });
 
+// Crear un environment (solo para usuarios con company asociado)
+app.post('/api/environments', verificarToken, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ message: 'El nombre del entorno es requerido' });
+    }
+
+    // Buscar la company relacionada al usuario autenticado
+    const company = await prisma.company.findUnique({ where: { userId: req.userId } });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no pertenece a una company' });
+    }
+
+    const environment = await prisma.environment.create({
+      data: {
+        name,
+        companyId: company.id,
+      },
+    });
+
+    res.status(201).json(environment);
+  } catch (error) {
+    console.error('Error creando environment:', error);
+    res.status(500).json({ message: 'Error al crear environment', error: error.message });
+  }
+});
+
+// Obtener environments del company del usuario autenticado
+app.get('/api/environments/mine', verificarToken, async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: { environments: true },
+    });
+
+    if (!company) {
+      return res.status(404).json({ message: 'Company no encontrada para el usuario' });
+    }
+
+    res.json(company.environments);
+  } catch (error) {
+    console.error('Error obteniendo environments:', error);
+    res.status(500).json({ message: 'Error al obtener environments', error: error.message });
+  }
+});
+
+// Crear un producto en un environment
+app.post('/api/products', verificarToken, async (req, res) => {
+  try {
+    const { name, price, barcode, environmentId } = req.body;
+
+    if (!name || !price || !barcode || !environmentId) {
+      return res.status(400).json({ message: 'Todos los campos son requeridos (name, price, barcode, environmentId)' });
+    }
+
+    // Verificar que el environment existe y pertenece a la company del usuario
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: { environments: true },
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no pertenece a una company' });
+    }
+
+    const envBelongsToCompany = company.environments.some(env => env.id === environmentId);
+    if (!envBelongsToCompany) {
+      return res.status(403).json({ message: 'El environment no pertenece a tu company' });
+    }
+
+    // Verificar si ya existe un producto con ese barcode en este environment
+    const existingProduct = await prisma.product.findFirst({
+      where: { barcode, environmentId },
+    });
+
+    if (existingProduct) {
+      return res.status(400).json({ message: 'Ya existe un producto con ese código de barras en este entorno' });
+    }
+
+    const product = await prisma.product.create({
+      data: {
+        name,
+        price: parseFloat(price),
+        barcode,
+        environmentId,
+      },
+    });
+
+    res.status(201).json(product);
+  } catch (error) {
+    console.error('Error creando producto:', error);
+    res.status(500).json({ message: 'Error al crear producto', error: error.message });
+  }
+});
+
+// Obtener productos de un environment
+app.get('/api/products/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Verificar que el environment pertenece a la company del usuario
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: { environments: true },
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no pertenece a una company' });
+    }
+
+    const envBelongsToCompany = company.environments.some(env => env.id === environmentId);
+    if (!envBelongsToCompany) {
+      return res.status(403).json({ message: 'El environment no pertenece a tu company' });
+    }
+
+    const products = await prisma.product.findMany({
+      where: { environmentId },
+    });
+
+    res.json(products);
+  } catch (error) {
+    console.error('Error obteniendo productos:', error);
+    res.status(500).json({ message: 'Error al obtener productos', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
