@@ -30,11 +30,15 @@ model Rol {
 }
 
 model Client {
-  id        Int  @id @default(autoincrement())
-  userId    Int  @unique
-  points    Int  @default(0)
+  id           Int        @id @default(autoincrement())
+  userId       Int        @unique
+  points       Int        @default(0)
 
-  user      User @relation(fields: [userId], references: [id])
+  environmentId Int?
+  environment   Environment? @relation(fields: [environmentId], references: [id])
+
+  user         User       @relation(fields: [userId], references: [id])
+  registers    Register[]
 }
 
 model Company {
@@ -43,15 +47,18 @@ model Company {
 
   user          User          @relation(fields: [userId], references: [id])
   environments  Environment[]
+  registers     Register[]
 }
 
 model Environment {
-  id        Int       @id @default(autoincrement())
+  id        Int        @id @default(autoincrement())
   name      String
   companyId Int
 
-  company   Company   @relation(fields: [companyId], references: [id])
+  company   Company    @relation(fields: [companyId], references: [id])
   products  Product[]
+  clients   Client[]
+  registers Register[]
 }
 
 model Product {
@@ -62,4 +69,22 @@ model Product {
   environmentId Int
 
   environment   Environment @relation(fields: [environmentId], references: [id])
+  registers     Register[]
+}
+
+model Register {
+  id           Int         @id @default(autoincrement())
+  datetime     DateTime    @default(now())
+
+  productId    Int
+  product      Product     @relation(fields: [productId], references: [id])
+
+  environmentId Int
+  environment   Environment @relation(fields: [environmentId], references: [id])
+
+  clientId     Int
+  client       Client      @relation(fields: [clientId], references: [id])
+
+  companyId    Int
+  company      Company     @relation(fields: [companyId], references: [id])
 }

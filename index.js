@@ -383,6 +383,248 @@ app.get('/api/products/:environmentId', verificarToken, async (req, res) => {
   }
 });
 
+// ==================== RUTAS PARA CLIENTES ====================
+
+// Obtener todos los environments disponibles (para que los clientes puedan unirse)
+app.get('/api/environments/all', verificarToken, async (req, res) => {
+  try {
+    const environments = await prisma.environment.findMany({
+      include: {
+        company: {
+          include: {
+            user: {
+              select: {
+                username: true,
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Formatear respuesta con nombre de la company
+    const formattedEnvironments = environments.map(env => ({
+      id: env.id,
+      name: env.name,
+      companyName: env.company.user.username,
+    }));
+
+    res.json(formattedEnvironments);
+  } catch (error) {
+    console.error('Error obteniendo todos los environments:', error);
+    res.status(500).json({ message: 'Error al obtener environments', error: error.message });
+  }
+});
+
+// Unirse a un environment (solo para clientes)
+app.post('/api/environments/join', verificarToken, async (req, res) => {
+  try {
+    const { environmentId } = req.body;
+
+    if (!environmentId) {
+      return res.status(400).json({ message: 'El environmentId es requerido' });
+    }
+
+    // Buscar el client relacionado al usuario autenticado
+    const client = await prisma.client.findUnique({ 
+      where: { userId: req.userId } 
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    // Verificar que el environment existe
+    const environment = await prisma.environment.findUnique({
+      where: { id: environmentId },
+    });
+
+    if (!environment) {
+      return res.status(404).json({ message: 'El entorno no existe' });
+    }
+
+    // Actualizar el client con el environmentId
+    const updatedClient = await prisma.client.update({
+      where: { id: client.id },
+      data: { environmentId },
+      include: {
+        environment: true,
+      }
+    });
+
+    res.json({
+      message: 'Te has unido al entorno exitosamente',
+      environment: updatedClient.environment,
+    });
+  } catch (error) {
+    console.error('Error uniéndose al environment:', error);
+    res.status(500).json({ message: 'Error al unirse al entorno', error: error.message });
+  }
+});
+
+// Obtener el environment al que está unido el cliente
+app.get('/api/environments/joined', verificarToken, async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environment: true,
+      },
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    if (!client.environment) {
+      return res.json({ environment: null });
+    }
+
+    res.json({ environment: client.environment });
+  } catch (error) {
+    console.error('Error obteniendo environment del cliente:', error);
+    res.status(500).json({ message: 'Error al obtener environment', error: error.message });
+  }
+});
+
+// Buscar producto por código de barras en el entorno del cliente
+app.get('/api/products/scan/:barcode', verificarToken, async (req, res) => {
+  try {
+    const { barcode } = req.params;
+
+    // Buscar el cliente y su entorno
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environment: true,
+      },
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    if (!client.environmentId) {
+      return res.status(400).json({ message: 'No estás unido a ningún entorno' });
+    }
+
+    // Buscar el producto por código de barras en el entorno del cliente
+    const product = await prisma.product.findFirst({
+      where: {
+        barcode,
+        environmentId: client.environmentId,
+      },
+    });
+
+    if (!product) {
+      return res.status(404).json({ message: 'Producto no encontrado en este entorno' });
+    }
+
+    res.json(product);
+  } catch (error) {
+    console.error('Error buscando producto por código de barras:', error);
+    res.status(500).json({ message: 'Error al buscar producto', error: error.message });
+  }
+});
+
+// Registrar una compra (crear un registro)
+app.post('/api/registers', verificarToken, async (req, res) => {
+  try {
+    const { productId } = req.body;
+
+    if (!productId) {
+      return res.status(400).json({ message: 'El productId es requerido' });
+    }
+
+    // Buscar el cliente
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environment: true,
+      },
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    if (!client.environmentId) {
+      return res.status(400).json({ message: 'No estás unido a ningún entorno' });
+    }
+
+    // Verificar que el producto existe y pertenece al entorno del cliente
+    const product = await prisma.product.findFirst({
+      where: {
+        id: productId,
+        environmentId: client.environmentId,
+      },
+    });
+
+    if (!product) {
+      return res.status(404).json({ message: 'Producto no encontrado en tu entorno' });
+    }
+
+    // Obtener el companyId del entorno
+    const environment = await prisma.environment.findUnique({
+      where: { id: client.environmentId },
+    });
+
+    // Crear el registro
+    const register = await prisma.register.create({
+      data: {
+        productId: product.id,
+        environmentId: client.environmentId,
+        clientId: client.id,
+        companyId: environment.companyId,
+      },
+      include: {
+        product: true,
+      },
+    });
+
+    res.status(201).json({
+      message: 'Compra registrada exitosamente',
+      register,
+    });
+  } catch (error) {
+    console.error('Error registrando compra:', error);
+    res.status(500).json({ message: 'Error al registrar compra', error: error.message });
+  }
+});
+
+// Obtener todos los registros de compras del cliente
+app.get('/api/registers/mine', verificarToken, async (req, res) => {
+  try {
+    // Buscar el cliente
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    // Obtener todos los registros del cliente
+    const registers = await prisma.register.findMany({
+      where: {
+        clientId: client.id,
+      },
+      include: {
+        product: true,
+        environment: true,
+      },
+      orderBy: {
+        datetime: 'desc',
+      },
+    });
+
+    res.json(registers);
+  } catch (error) {
+    console.error('Error obteniendo registros:', error);
+    res.status(500).json({ message: 'Error al obtener registros', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
