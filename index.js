@@ -383,6 +383,99 @@ app.get('/api/products/:environmentId', verificarToken, async (req, res) => {
   }
 });
 
+// Editar un producto
+app.put('/api/products/:id', verificarToken, async (req, res) => {
+  try {
+    const productId = parseInt(req.params.id);
+    const { name, price } = req.body;
+
+    if (!name || !price) {
+      return res.status(400).json({ message: 'Nombre y precio son requeridos' });
+    }
+
+    // Buscar el producto
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: { environment: true },
+    });
+
+    if (!product) {
+      return res.status(404).json({ message: 'Producto no encontrado' });
+    }
+
+    // Verificar que el producto pertenece a la company del usuario
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: { environments: true },
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no pertenece a una company' });
+    }
+
+    const envBelongsToCompany = company.environments.some(env => env.id === product.environmentId);
+    if (!envBelongsToCompany) {
+      return res.status(403).json({ message: 'No tienes permiso para editar este producto' });
+    }
+
+    // Actualizar el producto
+    const updatedProduct = await prisma.product.update({
+      where: { id: productId },
+      data: {
+        name,
+        price: parseFloat(price),
+      },
+    });
+
+    res.json(updatedProduct);
+  } catch (error) {
+    console.error('Error editando producto:', error);
+    res.status(500).json({ message: 'Error al editar producto', error: error.message });
+  }
+});
+
+// Eliminar un producto
+app.delete('/api/products/:id', verificarToken, async (req, res) => {
+  try {
+    const productId = parseInt(req.params.id);
+
+    // Buscar el producto
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: { environment: true },
+    });
+
+    if (!product) {
+      return res.status(404).json({ message: 'Producto no encontrado' });
+    }
+
+    // Verificar que el producto pertenece a la company del usuario
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: { environments: true },
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no pertenece a una company' });
+    }
+
+    const envBelongsToCompany = company.environments.some(env => env.id === product.environmentId);
+    if (!envBelongsToCompany) {
+      return res.status(403).json({ message: 'No tienes permiso para eliminar este producto' });
+    }
+
+    // Eliminar el producto
+    await prisma.product.delete({
+      where: { id: productId },
+    });
+
+    res.json({ message: 'Producto eliminado exitosamente' });
+  } catch (error) {
+    console.error('Error eliminando producto:', error);
+    res.status(500).json({ message: 'Error al eliminar producto', error: error.message });
+  }
+});
+
 // ==================== RUTAS PARA CLIENTES ====================
 
 // Obtener todos los environments disponibles (para que los clientes puedan unirse)
