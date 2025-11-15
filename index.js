@@ -625,6 +625,56 @@ app.get('/api/registers/mine', verificarToken, async (req, res) => {
   }
 });
 
+// Obtener todos los registros de compras del entorno de la company
+app.get('/api/registers/company', verificarToken, async (req, res) => {
+  try {
+    // Buscar la company
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environments: true,
+      },
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no es una compañía' });
+    }
+
+    if (company.environments.length === 0) {
+      return res.json([]);
+    }
+
+    // Obtener todos los registros del entorno de la company
+    const registers = await prisma.register.findMany({
+      where: {
+        companyId: company.id,
+      },
+      include: {
+        product: true,
+        environment: true,
+        client: {
+          include: {
+            user: {
+              select: {
+                username: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        datetime: 'desc',
+      },
+    });
+
+    res.json(registers);
+  } catch (error) {
+    console.error('Error obteniendo registros de la company:', error);
+    res.status(500).json({ message: 'Error al obtener registros', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
