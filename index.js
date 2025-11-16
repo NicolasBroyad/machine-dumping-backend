@@ -5,10 +5,13 @@ const jwt = require("jsonwebtoken");
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = 3000;
+
+// Configuración desde variables de entorno o valores por defecto
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Clave secreta para JWT (en producción, usar variable de entorno)
-const JWT_SECRET = "tu_clave_secreta_muy_segura_cambiala_en_produccion";
+const JWT_SECRET = process.env.JWT_SECRET || "tu_clave_secreta_muy_segura_cambiala_en_produccion";
 
 app.use(express.json());
 
@@ -829,6 +832,8 @@ app.get("/ranking", async (req, res) => {
   res.json(ranking);
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Servidor corriendo en http://${HOST}:${PORT}`);
+  console.log(`Accesible desde tu red local en http://192.168.0.44:${PORT}`);
+  console.log(`Para cambiar la IP, establece la variable de entorno HOST`);
 });
