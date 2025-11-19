@@ -62,14 +62,16 @@ model Environment {
 }
 
 model Product {
-  id            Int        @id @default(autoincrement())
+  id            Int          @id @default(autoincrement())
   name          String
   price         Float
-  barcode       String     @unique
+  barcode       String
   environmentId Int
-
-  environment   Environment @relation(fields: [environmentId], references: [id])
+  environment   Environment  @relation(fields: [environmentId], references: [id])
   registers     Register[]
+
+  @@unique([barcode, environmentId]) // Único por entorno
+  @@map("products")
 }
 
 model Register {
