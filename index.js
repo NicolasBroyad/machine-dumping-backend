@@ -771,6 +771,237 @@ app.get('/api/registers/company', verificarToken, async (req, res) => {
   }
 });
 
+// Obtener estadísticas del entorno de la company
+app.get('/api/statistics/company', verificarToken, async (req, res) => {
+  try {
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environments: true,
+      },
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no es una compañía' });
+    }
+
+    if (company.environments.length === 0) {
+      return res.json({
+        totalRecaudado: 0,
+        cantidadVendidos: 0,
+        productoMasComprado: null,
+        mayorComprador: null,
+      });
+    }
+
+    const environmentId = company.environments[0].id;
+
+    // Obtener todos los registros del entorno
+    const registers = await prisma.register.findMany({
+      where: { environmentId },
+      include: {
+        product: true,
+        client: {
+          include: {
+            user: {
+              select: {
+                username: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Calcular total recaudado y cantidad vendidos
+    const totalRecaudado = registers.reduce((sum, reg) => sum + reg.product.price, 0);
+    const cantidadVendidos = registers.length;
+
+    // Calcular producto más comprado
+    const productoCount = {};
+    registers.forEach(reg => {
+      const productId = reg.productId;
+      if (!productoCount[productId]) {
+        productoCount[productId] = {
+          count: 0,
+          name: reg.product.name,
+          price: reg.product.price,
+        };
+      }
+      productoCount[productId].count++;
+    });
+
+    let productoMasComprado = null;
+    let maxCount = 0;
+    for (const [productId, data] of Object.entries(productoCount)) {
+      if (data.count > maxCount) {
+        maxCount = data.count;
+        productoMasComprado = {
+          name: data.name,
+          count: data.count,
+          price: data.price,
+        };
+      }
+    }
+
+    // Calcular mayor comprador
+    const clienteGastos = {};
+    registers.forEach(reg => {
+      const clientId = reg.clientId;
+      if (!clienteGastos[clientId]) {
+        clienteGastos[clientId] = {
+          total: 0,
+          username: reg.client.user.username,
+          compras: 0,
+        };
+      }
+      clienteGastos[clientId].total += reg.product.price;
+      clienteGastos[clientId].compras++;
+    });
+
+    let mayorComprador = null;
+    let maxGasto = 0;
+    for (const [clientId, data] of Object.entries(clienteGastos)) {
+      if (data.total > maxGasto) {
+        maxGasto = data.total;
+        mayorComprador = {
+          username: data.username,
+          total: data.total,
+          compras: data.compras,
+        };
+      }
+    }
+
+    res.json({
+      totalRecaudado,
+      cantidadVendidos,
+      productoMasComprado,
+      mayorComprador,
+    });
+  } catch (error) {
+    console.error('Error obteniendo estadísticas:', error);
+    res.status(500).json({ message: 'Error al obtener estadísticas', error: error.message });
+  }
+});
+
+// Obtener estadísticas del cliente
+app.get('/api/statistics/client', verificarToken, async (req, res) => {
+  try {
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environment: true,
+      },
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    if (!client.environmentId) {
+      return res.json({
+        productoFavorito: null,
+        rankingPosicion: null,
+      });
+    }
+
+    const environmentId = client.environmentId;
+
+    // Obtener todos los registros del cliente
+    const myRegisters = await prisma.register.findMany({
+      where: { clientId: client.id },
+      include: {
+        product: true,
+      },
+    });
+
+    // Calcular producto favorito (más comprado por el cliente)
+    const productoCount = {};
+    myRegisters.forEach(reg => {
+      const productId = reg.productId;
+      if (!productoCount[productId]) {
+        productoCount[productId] = {
+          count: 0,
+          name: reg.product.name,
+          price: reg.product.price,
+        };
+      }
+      productoCount[productId].count++;
+    });
+
+    let productoFavorito = null;
+    let maxCount = 0;
+    for (const [productId, data] of Object.entries(productoCount)) {
+      if (data.count > maxCount) {
+        maxCount = data.count;
+        productoFavorito = {
+          name: data.name,
+          count: data.count,
+          price: data.price,
+        };
+      }
+    }
+
+    // Calcular ranking de clientes en el entorno
+    const allRegisters = await prisma.register.findMany({
+      where: { environmentId },
+      include: {
+        product: true,
+        client: {
+          include: {
+            user: {
+              select: {
+                username: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Agrupar por cliente y calcular total gastado
+    const clienteGastos = {};
+    allRegisters.forEach(reg => {
+      const clientId = reg.clientId;
+      if (!clienteGastos[clientId]) {
+        clienteGastos[clientId] = {
+          total: 0,
+          username: reg.client.user.username,
+        };
+      }
+      clienteGastos[clientId].total += reg.product.price;
+    });
+
+    // Ordenar clientes por total gastado (descendente)
+    const ranking = Object.entries(clienteGastos)
+      .map(([clientId, data]) => ({
+        clientId: parseInt(clientId),
+        username: data.username,
+        total: data.total,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    // Encontrar posición del cliente actual
+    let rankingPosicion = null;
+    const posicion = ranking.findIndex(r => r.clientId === client.id);
+    if (posicion !== -1) {
+      rankingPosicion = {
+        posicion: posicion + 1, // 1-indexed
+        totalParticipantes: ranking.length,
+        total: ranking[posicion].total,
+      };
+    }
+
+    res.json({
+      productoFavorito,
+      rankingPosicion,
+    });
+  } catch (error) {
+    console.error('Error obteniendo estadísticas del cliente:', error);
+    res.status(500).json({ message: 'Error al obtener estadísticas', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
