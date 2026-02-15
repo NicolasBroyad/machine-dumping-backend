@@ -79,8 +79,7 @@ app.post("/api/auth/register", async (req, res) => {
     if (rolId === 1) {
       await prisma.client.create({
         data: {
-          userId: usuario.id,
-          points: 0
+          userId: usuario.id
         }
       });
     }
@@ -533,24 +532,66 @@ app.post('/api/environments/join', verificarToken, async (req, res) => {
     // Verificar que el environment existe
     const environment = await prisma.environment.findUnique({
       where: { id: environmentId },
+      include: {
+        company: {
+          include: {
+            user: {
+              select: { username: true }
+            }
+          }
+        }
+      }
     });
 
     if (!environment) {
       return res.status(404).json({ message: 'El entorno no existe' });
     }
 
-    // Actualizar el client con el environmentId
-    const updatedClient = await prisma.client.update({
-      where: { id: client.id },
-      data: { environmentId },
+    // Verificar si ya está unido a este entorno
+    const existingMembership = await prisma.clientEnvironment.findUnique({
+      where: {
+        clientId_environmentId: {
+          clientId: client.id,
+          environmentId: environmentId
+        }
+      }
+    });
+
+    if (existingMembership) {
+      return res.status(400).json({ message: 'Ya estás unido a este entorno' });
+    }
+
+    // Crear la membresía en la tabla intermedia
+    const membership = await prisma.clientEnvironment.create({
+      data: {
+        clientId: client.id,
+        environmentId: environmentId,
+        points: 0
+      },
       include: {
-        environment: true,
+        environment: {
+          include: {
+            company: {
+              include: {
+                user: {
+                  select: { username: true }
+                }
+              }
+            }
+          }
+        }
       }
     });
 
     res.json({
       message: 'Te has unido al entorno exitosamente',
-      environment: updatedClient.environment,
+      environment: {
+        id: membership.environment.id,
+        name: membership.environment.name,
+        companyName: membership.environment.company.user.username,
+        points: membership.points,
+        joinedAt: membership.joinedAt
+      },
     });
   } catch (error) {
     console.error('Error uniéndose al environment:', error);
@@ -558,13 +599,27 @@ app.post('/api/environments/join', verificarToken, async (req, res) => {
   }
 });
 
-// Obtener el environment al que está unido el cliente
+// Obtener todos los environments a los que está unido el cliente
 app.get('/api/environments/joined', verificarToken, async (req, res) => {
   try {
     const client = await prisma.client.findUnique({
       where: { userId: req.userId },
       include: {
-        environment: true,
+        memberships: {
+          include: {
+            environment: {
+              include: {
+                company: {
+                  include: {
+                    user: {
+                      select: { username: true }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
     });
 
@@ -572,27 +627,81 @@ app.get('/api/environments/joined', verificarToken, async (req, res) => {
       return res.status(400).json({ message: 'El usuario no es un cliente' });
     }
 
-    if (!client.environment) {
-      return res.json({ environment: null });
-    }
+    // Formatear la respuesta
+    const environments = client.memberships.map(m => ({
+      id: m.environment.id,
+      name: m.environment.name,
+      companyName: m.environment.company.user.username,
+      points: m.points,
+      joinedAt: m.joinedAt
+    }));
 
-    res.json({ environment: client.environment });
+    res.json({ environments });
   } catch (error) {
-    console.error('Error obteniendo environment del cliente:', error);
-    res.status(500).json({ message: 'Error al obtener environment', error: error.message });
+    console.error('Error obteniendo environments del cliente:', error);
+    res.status(500).json({ message: 'Error al obtener environments', error: error.message });
   }
 });
 
-// Buscar producto por código de barras en el entorno del cliente
+// Salir de un environment (solo para clientes)
+app.delete('/api/environments/leave/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId }
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    // Verificar si está unido a este entorno
+    const membership = await prisma.clientEnvironment.findUnique({
+      where: {
+        clientId_environmentId: {
+          clientId: client.id,
+          environmentId: environmentId
+        }
+      }
+    });
+
+    if (!membership) {
+      return res.status(400).json({ message: 'No estás unido a este entorno' });
+    }
+
+    // Eliminar la membresía
+    await prisma.clientEnvironment.delete({
+      where: {
+        clientId_environmentId: {
+          clientId: client.id,
+          environmentId: environmentId
+        }
+      }
+    });
+
+    res.json({ message: 'Has salido del entorno exitosamente' });
+  } catch (error) {
+    console.error('Error saliendo del environment:', error);
+    res.status(500).json({ message: 'Error al salir del entorno', error: error.message });
+  }
+});
+
+// Buscar producto por código de barras en los entornos del cliente
 app.get('/api/products/scan/:barcode', verificarToken, async (req, res) => {
   try {
     const { barcode } = req.params;
+    const { environmentId } = req.query; // Opcional: especificar entorno
 
-    // Buscar el cliente y su entorno
+    // Buscar el cliente y sus membresías
     const client = await prisma.client.findUnique({
       where: { userId: req.userId },
       include: {
-        environment: true,
+        memberships: {
+          include: {
+            environment: true
+          }
+        }
       },
     });
 
@@ -600,23 +709,66 @@ app.get('/api/products/scan/:barcode', verificarToken, async (req, res) => {
       return res.status(400).json({ message: 'El usuario no es un cliente' });
     }
 
-    if (!client.environmentId) {
+    if (client.memberships.length === 0) {
       return res.status(400).json({ message: 'No estás unido a ningún entorno' });
     }
 
-    // Buscar el producto por código de barras en el entorno del cliente
-    const product = await prisma.product.findFirst({
-      where: {
-        barcode,
-        environmentId: client.environmentId,
-      },
-    });
+    // Si se especifica un environmentId, buscar solo en ese entorno
+    if (environmentId) {
+      const envId = parseInt(environmentId);
+      const isMember = client.memberships.some(m => m.environmentId === envId);
+      
+      if (!isMember) {
+        return res.status(403).json({ message: 'No estás unido a este entorno' });
+      }
 
-    if (!product) {
-      return res.status(404).json({ message: 'Producto no encontrado en este entorno' });
+      const product = await prisma.product.findFirst({
+        where: {
+          barcode,
+          environmentId: envId,
+        },
+        include: {
+          environment: true
+        }
+      });
+
+      if (!product) {
+        return res.status(404).json({ message: 'Producto no encontrado en este entorno' });
+      }
+
+      return res.json(product);
     }
 
-    res.json(product);
+    // Si no se especifica, buscar en todos los entornos del cliente
+    const environmentIds = client.memberships.map(m => m.environmentId);
+    
+    const products = await prisma.product.findMany({
+      where: {
+        barcode,
+        environmentId: { in: environmentIds },
+      },
+      include: {
+        environment: true
+      }
+    });
+
+    if (products.length === 0) {
+      return res.status(404).json({ message: 'Producto no encontrado en tus entornos' });
+    }
+
+    // Si hay solo un producto, devolverlo directamente
+    if (products.length === 1) {
+      return res.json(products[0]);
+    }
+
+    // Si hay múltiples productos (mismo barcode en diferentes entornos), devolver todos
+    res.json({
+      multiple: true,
+      products: products.map(p => ({
+        ...p,
+        environmentName: p.environment.name
+      }))
+    });
   } catch (error) {
     console.error('Error buscando producto por código de barras:', error);
     res.status(500).json({ message: 'Error al buscar producto', error: error.message });
@@ -626,17 +778,21 @@ app.get('/api/products/scan/:barcode', verificarToken, async (req, res) => {
 // Registrar una compra (crear un registro)
 app.post('/api/registers', verificarToken, async (req, res) => {
   try {
-    const { productId } = req.body;
+    const { productId, environmentId } = req.body;
 
     if (!productId) {
       return res.status(400).json({ message: 'El productId es requerido' });
     }
 
-    // Buscar el cliente
+    if (!environmentId) {
+      return res.status(400).json({ message: 'El environmentId es requerido' });
+    }
+
+    // Buscar el cliente y sus membresías
     const client = await prisma.client.findUnique({
       where: { userId: req.userId },
       include: {
-        environment: true,
+        memberships: true
       },
     });
 
@@ -644,38 +800,54 @@ app.post('/api/registers', verificarToken, async (req, res) => {
       return res.status(400).json({ message: 'El usuario no es un cliente' });
     }
 
-    if (!client.environmentId) {
-      return res.status(400).json({ message: 'No estás unido a ningún entorno' });
+    // Verificar que el cliente está unido al entorno
+    const membership = client.memberships.find(m => m.environmentId === environmentId);
+    if (!membership) {
+      return res.status(403).json({ message: 'No estás unido a este entorno' });
     }
 
-    // Verificar que el producto existe y pertenece al entorno del cliente
+    // Verificar que el producto existe y pertenece al entorno
     const product = await prisma.product.findFirst({
       where: {
         id: productId,
-        environmentId: client.environmentId,
+        environmentId: environmentId,
       },
     });
 
     if (!product) {
-      return res.status(404).json({ message: 'Producto no encontrado en tu entorno' });
+      return res.status(404).json({ message: 'Producto no encontrado en este entorno' });
     }
 
     // Obtener el companyId del entorno
     const environment = await prisma.environment.findUnique({
-      where: { id: client.environmentId },
+      where: { id: environmentId },
     });
 
     // Crear el registro
     const register = await prisma.register.create({
       data: {
         productId: product.id,
-        environmentId: client.environmentId,
+        environmentId: environmentId,
         clientId: client.id,
         companyId: environment.companyId,
       },
       include: {
         product: true,
+        environment: true,
       },
+    });
+
+    // Actualizar puntos del cliente en este entorno (ejemplo: 1 punto por compra)
+    await prisma.clientEnvironment.update({
+      where: {
+        clientId_environmentId: {
+          clientId: client.id,
+          environmentId: environmentId
+        }
+      },
+      data: {
+        points: { increment: 1 }
+      }
     });
 
     res.status(201).json({
@@ -884,13 +1056,19 @@ app.get('/api/statistics/company', verificarToken, async (req, res) => {
   }
 });
 
-// Obtener estadísticas del cliente
+// Obtener estadísticas del cliente (por entorno o general)
 app.get('/api/statistics/client', verificarToken, async (req, res) => {
   try {
+    const { environmentId } = req.query; // Opcional: estadísticas de un entorno específico
+
     const client = await prisma.client.findUnique({
       where: { userId: req.userId },
       include: {
-        environment: true,
+        memberships: {
+          include: {
+            environment: true
+          }
+        }
       },
     });
 
@@ -898,103 +1076,117 @@ app.get('/api/statistics/client', verificarToken, async (req, res) => {
       return res.status(400).json({ message: 'El usuario no es un cliente' });
     }
 
-    if (!client.environmentId) {
+    if (client.memberships.length === 0) {
       return res.json({
         productoFavorito: null,
         rankingPosicion: null,
+        entornos: []
       });
     }
 
-    const environmentId = client.environmentId;
-
-    // Obtener todos los registros del cliente
-    const myRegisters = await prisma.register.findMany({
-      where: { clientId: client.id },
-      include: {
-        product: true,
-      },
-    });
-
-    // Calcular producto favorito (más comprado por el cliente)
-    const productoCount = {};
-    myRegisters.forEach(reg => {
-      const productId = reg.productId;
-      if (!productoCount[productId]) {
-        productoCount[productId] = {
-          count: 0,
-          name: reg.product.name,
-          price: reg.product.price,
-        };
+    // Si se especifica un entorno, calcular estadísticas solo para ese entorno
+    if (environmentId) {
+      const envId = parseInt(environmentId);
+      const membership = client.memberships.find(m => m.environmentId === envId);
+      
+      if (!membership) {
+        return res.status(403).json({ message: 'No estás unido a este entorno' });
       }
-      productoCount[productId].count++;
-    });
 
-    let productoFavorito = null;
-    let maxCount = 0;
-    for (const [productId, data] of Object.entries(productoCount)) {
-      if (data.count > maxCount) {
-        maxCount = data.count;
-        productoFavorito = {
-          name: data.name,
-          count: data.count,
-          price: data.price,
-        };
-      }
-    }
-
-    // Calcular ranking de clientes en el entorno
-    const allRegisters = await prisma.register.findMany({
-      where: { environmentId },
-      include: {
-        product: true,
-        client: {
-          include: {
-            user: {
-              select: {
-                username: true,
-              },
-            },
-          },
+      // Obtener registros del cliente en este entorno
+      const myRegisters = await prisma.register.findMany({
+        where: { 
+          clientId: client.id,
+          environmentId: envId
         },
-      },
-    });
+        include: { product: true },
+      });
 
-    // Agrupar por cliente y calcular total gastado
-    const clienteGastos = {};
-    allRegisters.forEach(reg => {
-      const clientId = reg.clientId;
-      if (!clienteGastos[clientId]) {
-        clienteGastos[clientId] = {
-          total: 0,
-          username: reg.client.user.username,
+      // Calcular producto favorito
+      const productoCount = {};
+      myRegisters.forEach(reg => {
+        const productId = reg.productId;
+        if (!productoCount[productId]) {
+          productoCount[productId] = { count: 0, name: reg.product.name, price: reg.product.price };
+        }
+        productoCount[productId].count++;
+      });
+
+      let productoFavorito = null;
+      let maxCount = 0;
+      for (const [productId, data] of Object.entries(productoCount)) {
+        if (data.count > maxCount) {
+          maxCount = data.count;
+          productoFavorito = { name: data.name, count: data.count, price: data.price };
+        }
+      }
+
+      // Calcular ranking en el entorno
+      const allRegisters = await prisma.register.findMany({
+        where: { environmentId: envId },
+        include: {
+          product: true,
+          client: { include: { user: { select: { username: true } } } },
+        },
+      });
+
+      const clienteGastos = {};
+      allRegisters.forEach(reg => {
+        const cId = reg.clientId;
+        if (!clienteGastos[cId]) {
+          clienteGastos[cId] = { total: 0, username: reg.client.user.username };
+        }
+        clienteGastos[cId].total += reg.product.price;
+      });
+
+      const ranking = Object.entries(clienteGastos)
+        .map(([cId, data]) => ({ clientId: parseInt(cId), username: data.username, total: data.total }))
+        .sort((a, b) => b.total - a.total);
+
+      let rankingPosicion = null;
+      const posicion = ranking.findIndex(r => r.clientId === client.id);
+      if (posicion !== -1) {
+        rankingPosicion = {
+          posicion: posicion + 1,
+          totalParticipantes: ranking.length,
+          total: ranking[posicion].total,
         };
       }
-      clienteGastos[clientId].total += reg.product.price;
-    });
 
-    // Ordenar clientes por total gastado (descendente)
-    const ranking = Object.entries(clienteGastos)
-      .map(([clientId, data]) => ({
-        clientId: parseInt(clientId),
-        username: data.username,
-        total: data.total,
-      }))
-      .sort((a, b) => b.total - a.total);
-
-    // Encontrar posición del cliente actual
-    let rankingPosicion = null;
-    const posicion = ranking.findIndex(r => r.clientId === client.id);
-    if (posicion !== -1) {
-      rankingPosicion = {
-        posicion: posicion + 1, // 1-indexed
-        totalParticipantes: ranking.length,
-        total: ranking[posicion].total,
-      };
+      return res.json({
+        environmentId: envId,
+        environmentName: membership.environment.name,
+        points: membership.points,
+        productoFavorito,
+        rankingPosicion,
+      });
     }
+
+    // Si no se especifica entorno, devolver resumen de todos los entornos
+    const entornosStats = await Promise.all(client.memberships.map(async (membership) => {
+      const envId = membership.environmentId;
+      
+      const myRegisters = await prisma.register.findMany({
+        where: { clientId: client.id, environmentId: envId },
+        include: { product: true },
+      });
+
+      const totalGastado = myRegisters.reduce((sum, reg) => sum + reg.product.price, 0);
+      const cantidadCompras = myRegisters.length;
+
+      return {
+        environmentId: envId,
+        environmentName: membership.environment.name,
+        points: membership.points,
+        totalGastado,
+        cantidadCompras,
+        joinedAt: membership.joinedAt
+      };
+    }));
 
     res.json({
-      productoFavorito,
-      rankingPosicion,
+      entornos: entornosStats,
+      totalEntornos: entornosStats.length
     });
   } catch (error) {
     console.error('Error obteniendo estadísticas del cliente:', error);

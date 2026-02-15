@@ -30,15 +30,25 @@ model Rol {
 }
 
 model Client {
-  id           Int        @id @default(autoincrement())
-  userId       Int        @unique
-  points       Int        @default(0)
+  id           Int                   @id @default(autoincrement())
+  userId       Int                   @unique
 
-  environmentId Int?
-  environment   Environment? @relation(fields: [environmentId], references: [id])
-
-  user         User       @relation(fields: [userId], references: [id])
+  user         User                  @relation(fields: [userId], references: [id])
+  memberships  ClientEnvironment[]   // Relación a múltiples entornos
   registers    Register[]
+}
+
+model ClientEnvironment {
+  id            Int         @id @default(autoincrement())
+  clientId      Int
+  environmentId Int
+  points        Int         @default(0)  // Puntos específicos por entorno
+  joinedAt      DateTime    @default(now())
+
+  client        Client      @relation(fields: [clientId], references: [id])
+  environment   Environment @relation(fields: [environmentId], references: [id])
+
+  @@unique([clientId, environmentId]) // Un cliente solo puede unirse una vez a cada entorno
 }
 
 model Company {
@@ -51,13 +61,13 @@ model Company {
 }
 
 model Environment {
-  id        Int        @id @default(autoincrement())
+  id        Int                   @id @default(autoincrement())
   name      String
   companyId Int
 
-  company   Company    @relation(fields: [companyId], references: [id])
+  company   Company               @relation(fields: [companyId], references: [id])
   products  Product[]
-  clients   Client[]
+  members   ClientEnvironment[]   // Clientes miembros a través de tabla intermedia
   registers Register[]
 }
 
