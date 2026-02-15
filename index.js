@@ -133,13 +133,18 @@ app.post("/api/auth/login", async (req, res) => {
     // Validar campos requeridos
     if (!email || !password) {
       return res.status(400).json({ 
-        message: "Email y contraseña son requeridos" 
+        message: "Email/Usuario y contraseña son requeridos" 
       });
     }
 
-    // Buscar usuario por email
-    const usuario = await prisma.user.findUnique({
-      where: { email },
+    // Buscar usuario por email O username
+    const usuario = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: email },
+          { username: email } // Usamos el campo 'email' del body pero buscamos también por username
+        ]
+      },
       include: {
         rol: true,
         client: true,
