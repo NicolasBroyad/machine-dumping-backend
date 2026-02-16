@@ -1227,6 +1227,159 @@ app.get('/api/statistics/client', verificarToken, async (req, res) => {
   }
 });
 
+// Obtener ranking completo de un entorno
+app.get('/api/statistics/ranking/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Verificar que el entorno existe
+    const environment = await prisma.environment.findUnique({
+      where: { id: environmentId },
+      include: { company: { include: { user: { select: { username: true } } } } }
+    });
+
+    if (!environment) {
+      return res.status(404).json({ message: 'Entorno no encontrado' });
+    }
+
+    // Obtener todos los registros del entorno
+    const allRegisters = await prisma.register.findMany({
+      where: { environmentId },
+      include: {
+        client: { include: { user: { select: { username: true } } } },
+      },
+    });
+
+    // Calcular gastos por cliente
+    const clienteGastos = {};
+    allRegisters.forEach(reg => {
+      const cId = reg.clientId;
+      if (!clienteGastos[cId]) {
+        clienteGastos[cId] = { 
+          total: 0, 
+          username: reg.client.user.username,
+          compras: 0
+        };
+      }
+      clienteGastos[cId].total += reg.price;
+      clienteGastos[cId].compras++;
+    });
+
+    // Crear ranking ordenado
+    const ranking = Object.entries(clienteGastos)
+      .map(([cId, data], index) => ({ 
+        clientId: parseInt(cId), 
+        username: data.username, 
+        total: data.total,
+        compras: data.compras
+      }))
+      .sort((a, b) => b.total - a.total)
+      .map((item, index) => ({ ...item, posicion: index + 1 }));
+
+    res.json({
+      environmentId,
+      environmentName: environment.name,
+      companyName: environment.company.user.username,
+      totalParticipantes: ranking.length,
+      ranking
+    });
+  } catch (error) {
+    console.error('Error obteniendo ranking:', error);
+    res.status(500).json({ message: 'Error al obtener ranking', error: error.message });
+  }
+});
+
+// Obtener ranking de productos favoritos del cliente en un entorno
+app.get('/api/statistics/productos-favoritos/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Buscar el cliente
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+      include: {
+        memberships: {
+          where: { environmentId },
+          include: { environment: true }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    // Verificar que está unido al entorno
+    if (client.memberships.length === 0) {
+      return res.status(403).json({ message: 'No estás unido a este entorno' });
+    }
+
+    const membership = client.memberships[0];
+
+    // Obtener todos los registros del cliente en este entorno
+    const myRegisters = await prisma.register.findMany({
+      where: {
+        clientId: client.id,
+        environmentId
+      },
+      include: { product: true },
+      orderBy: { datetime: 'desc' }
+    });
+
+    // Agrupar por producto y calcular estadísticas
+    const productosStats = {};
+    myRegisters.forEach(reg => {
+      const productId = reg.productId;
+      if (!productosStats[productId]) {
+        productosStats[productId] = {
+          productId,
+          name: reg.product.name,
+          count: 0,
+          totalGastado: 0,
+          precioUnitario: reg.price, // Usar el último precio pagado
+          primeraCompra: reg.datetime,
+          ultimaCompra: reg.datetime
+        };
+      }
+      productosStats[productId].count++;
+      productosStats[productId].totalGastado += reg.price;
+      
+      // Actualizar fechas
+      if (new Date(reg.datetime) < new Date(productosStats[productId].primeraCompra)) {
+        productosStats[productId].primeraCompra = reg.datetime;
+      }
+      if (new Date(reg.datetime) > new Date(productosStats[productId].ultimaCompra)) {
+        productosStats[productId].ultimaCompra = reg.datetime;
+      }
+    });
+
+    // Crear ranking ordenado por cantidad de compras
+    const ranking = Object.values(productosStats)
+      .sort((a, b) => b.count - a.count)
+      .map((item, index) => ({
+        ...item,
+        posicion: index + 1
+      }));
+
+    // Calcular totales
+    const totalProductosDistintos = ranking.length;
+    const totalCompras = myRegisters.length;
+    const totalGastado = myRegisters.reduce((sum, reg) => sum + reg.price, 0);
+
+    res.json({
+      environmentId,
+      environmentName: membership.environment.name,
+      totalProductosDistintos,
+      totalCompras,
+      totalGastado,
+      productosFavoritos: ranking
+    });
+  } catch (error) {
+    console.error('Error obteniendo productos favoritos:', error);
+    res.status(500).json({ message: 'Error al obtener productos favoritos', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
