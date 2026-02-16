@@ -1473,6 +1473,245 @@ app.get('/api/statistics/gastos-por-dia/:environmentId', verificarToken, async (
   }
 });
 
+// ==================== ENDPOINTS PARA VENDEDOR (COMPANY) ====================
+
+// Ranking de clientes para vendedor
+app.get('/api/statistics/company/ranking-clientes/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Verificar que el usuario es una company y dueña del entorno
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environments: {
+          where: { id: environmentId }
+        }
+      }
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no es una compañía' });
+    }
+
+    if (company.environments.length === 0) {
+      return res.status(403).json({ message: 'No tienes acceso a este entorno' });
+    }
+
+    const environment = company.environments[0];
+
+    // Obtener todos los registros del entorno
+    const registers = await prisma.register.findMany({
+      where: { environmentId },
+      include: {
+        product: true,
+        client: {
+          include: {
+            user: { select: { username: true } }
+          }
+        }
+      }
+    });
+
+    // Agrupar por cliente
+    const clienteStats = {};
+    registers.forEach(reg => {
+      const clientId = reg.clientId;
+      if (!clienteStats[clientId]) {
+        clienteStats[clientId] = {
+          clientId,
+          username: reg.client.user.username,
+          total: 0,
+          compras: 0
+        };
+      }
+      clienteStats[clientId].total += reg.price;
+      clienteStats[clientId].compras++;
+    });
+
+    // Crear ranking ordenado por total gastado
+    const ranking = Object.values(clienteStats)
+      .sort((a, b) => b.total - a.total)
+      .map((item, index) => ({
+        ...item,
+        posicion: index + 1
+      }));
+
+    res.json({
+      environmentId,
+      environmentName: environment.name,
+      totalClientes: ranking.length,
+      totalRecaudado: registers.reduce((sum, reg) => sum + reg.price, 0),
+      ranking
+    });
+  } catch (error) {
+    console.error('Error obteniendo ranking de clientes:', error);
+    res.status(500).json({ message: 'Error al obtener ranking de clientes', error: error.message });
+  }
+});
+
+// Ranking de productos para vendedor
+app.get('/api/statistics/company/ranking-productos/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Verificar que el usuario es una company y dueña del entorno
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environments: {
+          where: { id: environmentId }
+        }
+      }
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no es una compañía' });
+    }
+
+    if (company.environments.length === 0) {
+      return res.status(403).json({ message: 'No tienes acceso a este entorno' });
+    }
+
+    const environment = company.environments[0];
+
+    // Obtener todos los registros del entorno
+    const registers = await prisma.register.findMany({
+      where: { environmentId },
+      include: { product: true },
+      orderBy: { datetime: 'desc' }
+    });
+
+    // Agrupar por producto
+    const productosStats = {};
+    registers.forEach(reg => {
+      const productId = reg.productId;
+      if (!productosStats[productId]) {
+        productosStats[productId] = {
+          productId,
+          name: reg.product.name,
+          count: 0,
+          totalRecaudado: 0,
+          precioUnitario: reg.price
+        };
+      }
+      productosStats[productId].count++;
+      productosStats[productId].totalRecaudado += reg.price;
+    });
+
+    // Crear ranking ordenado por cantidad de ventas
+    const ranking = Object.values(productosStats)
+      .sort((a, b) => b.count - a.count)
+      .map((item, index) => ({
+        ...item,
+        posicion: index + 1
+      }));
+
+    res.json({
+      environmentId,
+      environmentName: environment.name,
+      totalProductosVendidos: ranking.length,
+      totalVentas: registers.length,
+      totalRecaudado: registers.reduce((sum, reg) => sum + reg.price, 0),
+      productos: ranking
+    });
+  } catch (error) {
+    console.error('Error obteniendo ranking de productos:', error);
+    res.status(500).json({ message: 'Error al obtener ranking de productos', error: error.message });
+  }
+});
+
+// Recaudación por día para vendedor
+app.get('/api/statistics/company/recaudado-por-dia/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Verificar que el usuario es una company y dueña del entorno
+    const company = await prisma.company.findUnique({
+      where: { userId: req.userId },
+      include: {
+        environments: {
+          where: { id: environmentId }
+        }
+      }
+    });
+
+    if (!company) {
+      return res.status(400).json({ message: 'El usuario no es una compañía' });
+    }
+
+    if (company.environments.length === 0) {
+      return res.status(403).json({ message: 'No tienes acceso a este entorno' });
+    }
+
+    const environment = company.environments[0];
+
+    // Obtener registros de los últimos 30 días
+    const hace30Dias = new Date();
+    hace30Dias.setDate(hace30Dias.getDate() - 30);
+
+    const registers = await prisma.register.findMany({
+      where: {
+        environmentId,
+        datetime: { gte: hace30Dias }
+      },
+      include: { product: true },
+      orderBy: { datetime: 'asc' }
+    });
+
+    // Agrupar por día
+    const recaudadoPorDia = {};
+    registers.forEach(reg => {
+      const fecha = new Date(reg.datetime);
+      const dia = fecha.toISOString().split('T')[0];
+      
+      if (!recaudadoPorDia[dia]) {
+        recaudadoPorDia[dia] = {
+          fecha: dia,
+          total: 0,
+          ventas: 0
+        };
+      }
+      recaudadoPorDia[dia].total += reg.price;
+      recaudadoPorDia[dia].ventas++;
+    });
+
+    // Convertir a array ordenado por fecha
+    const dias = Object.values(recaudadoPorDia).sort((a, b) => 
+      new Date(a.fecha) - new Date(b.fecha)
+    );
+
+    // Calcular estadísticas
+    const totalRecaudado = registers.reduce((sum, reg) => sum + reg.price, 0);
+    const totalVentas = registers.length;
+    const promedioPorVenta = totalVentas > 0 ? totalRecaudado / totalVentas : 0;
+    const diasConVentas = dias.length;
+    const promedioPorDia = diasConVentas > 0 ? totalRecaudado / diasConVentas : 0;
+
+    // Día con más recaudación
+    let diaMaxRecaudado = null;
+    if (dias.length > 0) {
+      diaMaxRecaudado = dias.reduce((max, dia) => dia.total > max.total ? dia : max, dias[0]);
+    }
+
+    res.json({
+      environmentId,
+      environmentName: environment.name,
+      periodo: '30 días',
+      totalRecaudado,
+      totalVentas,
+      promedioPorVenta,
+      promedioPorDia,
+      diasConVentas,
+      diaMaxRecaudado,
+      recaudadoPorDia: dias
+    });
+  } catch (error) {
+    console.error('Error obteniendo recaudación por día:', error);
+    res.status(500).json({ message: 'Error al obtener recaudación por día', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
