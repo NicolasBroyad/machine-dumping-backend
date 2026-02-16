@@ -901,6 +901,8 @@ app.get('/api/registers/mine', verificarToken, async (req, res) => {
 // Obtener todos los registros de compras del entorno de la company
 app.get('/api/registers/company', verificarToken, async (req, res) => {
   try {
+    const { environmentId } = req.query; // Opcional: filtrar por entorno específico
+
     // Buscar la company
     const company = await prisma.company.findUnique({
       where: { userId: req.userId },
@@ -917,11 +919,23 @@ app.get('/api/registers/company', verificarToken, async (req, res) => {
       return res.json([]);
     }
 
+    // Construir filtro: si se especifica environmentId, filtrar por ese entorno
+    const whereClause = {
+      companyId: company.id,
+    };
+
+    if (environmentId) {
+      // Verificar que el entorno pertenece a esta company
+      const envBelongsToCompany = company.environments.some(env => env.id === parseInt(environmentId));
+      if (!envBelongsToCompany) {
+        return res.status(403).json({ message: 'No tienes acceso a este entorno' });
+      }
+      whereClause.environmentId = parseInt(environmentId);
+    }
+
     // Obtener todos los registros del entorno de la company
     const registers = await prisma.register.findMany({
-      where: {
-        companyId: company.id,
-      },
+      where: whereClause,
       include: {
         product: true,
         environment: true,
@@ -951,6 +965,8 @@ app.get('/api/registers/company', verificarToken, async (req, res) => {
 // Obtener estadísticas del entorno de la company
 app.get('/api/statistics/company', verificarToken, async (req, res) => {
   try {
+    const { environmentId: requestedEnvId } = req.query; // Opcional: estadísticas de un entorno específico
+
     const company = await prisma.company.findUnique({
       where: { userId: req.userId },
       include: {
@@ -971,7 +987,18 @@ app.get('/api/statistics/company', verificarToken, async (req, res) => {
       });
     }
 
-    const environmentId = company.environments[0].id;
+    // Si se especifica un entorno, usarlo; sino, usar el primero
+    let environmentId;
+    if (requestedEnvId) {
+      // Verificar que el entorno pertenece a esta company
+      const envBelongsToCompany = company.environments.some(env => env.id === parseInt(requestedEnvId));
+      if (!envBelongsToCompany) {
+        return res.status(403).json({ message: 'No tienes acceso a este entorno' });
+      }
+      environmentId = parseInt(requestedEnvId);
+    } else {
+      environmentId = company.environments[0].id;
+    }
 
     // Obtener todos los registros del entorno
     const registers = await prisma.register.findMany({
