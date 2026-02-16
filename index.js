@@ -828,13 +828,14 @@ app.post('/api/registers', verificarToken, async (req, res) => {
       where: { id: environmentId },
     });
 
-    // Crear el registro
+    // Crear el registro con el precio histórico
     const register = await prisma.register.create({
       data: {
         productId: product.id,
         environmentId: environmentId,
         clientId: client.id,
         companyId: environment.companyId,
+        price: product.price, // Guardar el precio al momento de la compra
       },
       include: {
         product: true,
@@ -1018,7 +1019,7 @@ app.get('/api/statistics/company', verificarToken, async (req, res) => {
     });
 
     // Calcular total recaudado y cantidad vendidos
-    const totalRecaudado = registers.reduce((sum, reg) => sum + reg.product.price, 0);
+    const totalRecaudado = registers.reduce((sum, reg) => sum + reg.price, 0);
     const cantidadVendidos = registers.length;
 
     // Calcular producto más comprado
@@ -1029,7 +1030,7 @@ app.get('/api/statistics/company', verificarToken, async (req, res) => {
         productoCount[productId] = {
           count: 0,
           name: reg.product.name,
-          price: reg.product.price,
+          price: reg.price,
         };
       }
       productoCount[productId].count++;
@@ -1059,7 +1060,7 @@ app.get('/api/statistics/company', verificarToken, async (req, res) => {
           compras: 0,
         };
       }
-      clienteGastos[clientId].total += reg.product.price;
+      clienteGastos[clientId].total += reg.price;
       clienteGastos[clientId].compras++;
     });
 
@@ -1139,7 +1140,7 @@ app.get('/api/statistics/client', verificarToken, async (req, res) => {
       myRegisters.forEach(reg => {
         const productId = reg.productId;
         if (!productoCount[productId]) {
-          productoCount[productId] = { count: 0, name: reg.product.name, price: reg.product.price };
+          productoCount[productId] = { count: 0, name: reg.product.name, price: reg.price };
         }
         productoCount[productId].count++;
       });
@@ -1168,7 +1169,7 @@ app.get('/api/statistics/client', verificarToken, async (req, res) => {
         if (!clienteGastos[cId]) {
           clienteGastos[cId] = { total: 0, username: reg.client.user.username };
         }
-        clienteGastos[cId].total += reg.product.price;
+        clienteGastos[cId].total += reg.price;
       });
 
       const ranking = Object.entries(clienteGastos)
@@ -1203,7 +1204,7 @@ app.get('/api/statistics/client', verificarToken, async (req, res) => {
         include: { product: true },
       });
 
-      const totalGastado = myRegisters.reduce((sum, reg) => sum + reg.product.price, 0);
+      const totalGastado = myRegisters.reduce((sum, reg) => sum + reg.price, 0);
       const cantidadCompras = myRegisters.length;
 
       return {
