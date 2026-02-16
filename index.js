@@ -1380,6 +1380,99 @@ app.get('/api/statistics/productos-favoritos/:environmentId', verificarToken, as
   }
 });
 
+// Endpoint para obtener gastos por día (para gráfico de barras)
+app.get('/api/statistics/gastos-por-dia/:environmentId', verificarToken, async (req, res) => {
+  try {
+    const environmentId = parseInt(req.params.environmentId);
+
+    // Buscar el cliente
+    const client = await prisma.client.findUnique({
+      where: { userId: req.userId },
+      include: {
+        memberships: {
+          where: { environmentId },
+          include: { environment: true }
+        }
+      }
+    });
+
+    if (!client) {
+      return res.status(400).json({ message: 'El usuario no es un cliente' });
+    }
+
+    if (client.memberships.length === 0) {
+      return res.status(403).json({ message: 'No estás unido a este entorno' });
+    }
+
+    const membership = client.memberships[0];
+
+    // Obtener registros de los últimos 30 días
+    const hace30Dias = new Date();
+    hace30Dias.setDate(hace30Dias.getDate() - 30);
+
+    const myRegisters = await prisma.register.findMany({
+      where: {
+        clientId: client.id,
+        environmentId,
+        datetime: { gte: hace30Dias }
+      },
+      include: { product: true },
+      orderBy: { datetime: 'asc' }
+    });
+
+    // Agrupar por día
+    const gastosPorDia = {};
+    myRegisters.forEach(reg => {
+      const fecha = new Date(reg.datetime);
+      const dia = fecha.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      if (!gastosPorDia[dia]) {
+        gastosPorDia[dia] = {
+          fecha: dia,
+          total: 0,
+          compras: 0
+        };
+      }
+      gastosPorDia[dia].total += reg.price;
+      gastosPorDia[dia].compras++;
+    });
+
+    // Convertir a array ordenado por fecha
+    const dias = Object.values(gastosPorDia).sort((a, b) => 
+      new Date(a.fecha) - new Date(b.fecha)
+    );
+
+    // Calcular estadísticas adicionales
+    const totalGastado = myRegisters.reduce((sum, reg) => sum + reg.price, 0);
+    const totalCompras = myRegisters.length;
+    const promedioPorCompra = totalCompras > 0 ? totalGastado / totalCompras : 0;
+    const diasConCompras = dias.length;
+    const promedioPorDia = diasConCompras > 0 ? totalGastado / diasConCompras : 0;
+
+    // Encontrar el día con más gasto
+    let diaMaxGasto = null;
+    if (dias.length > 0) {
+      diaMaxGasto = dias.reduce((max, dia) => dia.total > max.total ? dia : max, dias[0]);
+    }
+
+    res.json({
+      environmentId,
+      environmentName: membership.environment.name,
+      periodo: '30 días',
+      totalGastado,
+      totalCompras,
+      promedioPorCompra,
+      promedioPorDia,
+      diasConCompras,
+      diaMaxGasto,
+      gastosPorDia: dias
+    });
+  } catch (error) {
+    console.error('Error obteniendo gastos por día:', error);
+    res.status(500).json({ message: 'Error al obtener gastos por día', error: error.message });
+  }
+});
+
 // ==================== RUTAS ORIGINALES ====================
 
 
